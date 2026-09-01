@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="aurora-dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contagem Regressiva de Dias Letivos</title>
+  <meta name="description" content="Contagem regressiva moderna e minimalista dos dias letivos restantes com calendário e feriados.">
+  
+  <!-- Fontes Google Modernas -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Fundo Animado com Efeitos Aurora e Partículas -->
+  <div class="aurora-bg" aria-hidden="true">
+    <div class="aurora-orb orb-1"></div>
+    <div class="aurora-orb orb-2"></div>
+    <div class="aurora-orb orb-3"></div>
+    <div class="stars-layer"></div>
+  </div>
+
+  <!-- Botões Flutuantes Rápidos no Canto Superior -->
+  <header class="floating-header">
+    <div class="status-pill" id="today-status-pill">
+      <span class="status-dot"></span>
+      <span id="today-status-text">Calculando hoje...</span>
+    </div>
+    
+    <div class="floating-actions">
+      <button class="glass-btn-icon" id="btn-sound-toggle" title="Alternar Efeitos Sonoros">
+        <i data-lucide="volume-2"></i>
+      </button>
+      <button class="glass-btn-icon" id="btn-theme-modal" title="Alterar Tema Visual">
+        <i data-lucide="palette"></i>
+      </button>
+      <button class="glass-btn-icon" id="btn-open-settings" title="Configurar Datas e Aulas">
+        <i data-lucide="settings"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= SEÇÃO 1: HERO - CONTAGEM GIGANTE BONITA E INTERATIVA ================= -->
+  <section class="hero-section" id="hero">
+    <div class="hero-container">
+      
+      <!-- Tag do Curso / Período -->
+      <div class="period-badge glass-card-sm" id="period-badge" title="Clique para editar datas">
+        <i data-lucide="graduation-cap"></i>
+        <span id="course-title-text">Dias Letivos Restantes</span>
+        <span class="badge-date-range" id="period-date-range">--/-- até --/--</span>
+      </div>
+
+      <!-- Super Número da Contagem Regressiva -->
+      <div class="countdown-hero-card glass-card" id="countdown-card">
+        <span class="countdown-pre-label">FALTAM EXATAMENTE</span>
+        
+        <div class="huge-number-container">
+          <span class="huge-countdown-number" id="huge-days-number">--</span>
+        </div>
+        
+        <h1 class="countdown-main-label">DIAS LETIVOS</h1>
+        <p class="countdown-sub-label" id="countdown-sub-text">descontando finais de semana e feriados</p>
+
+        <!-- Barra de Progresso Fluida -->
+        <div class="progress-wrapper">
+          <div class="progress-labels">
+            <span>Progresso Concluído</span>
+            <strong id="progress-percent">0%</strong>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+          <div class="progress-details-row">
+            <span>Já foram: <strong id="stat-days-done">0</strong> dias</span>
+            <span>Total previsto: <strong id="stat-days-total">0</strong> dias</span>
+          </div>
+        </div>
+
+        <!-- Mini Pílulas de Estatísticas Rápidas -->
+        <div class="stats-pills-row">
+          <div class="stat-pill">
+            <i data-lucide="calendar"></i>
+            <div>
+              <strong id="stat-weeks-left">--</strong>
+              <small>semanas</small>
+            </div>
+          </div>
+          <div class="stat-pill">
+            <i data-lucide="clock"></i>
+            <div>
+              <strong id="stat-hours-left">--h</strong>
+              <small>horas de aula</small>
+            </div>
+          </div>
+          <div class="stat-pill">
+            <i data-lucide="calendar-days"></i>
+            <div>
+              <strong id="stat-calendar-days">--</strong>
+              <small>dias corridos</small>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Indicador de Rolagem para o Calendário -->
+      <a href="#calendar-section" class="scroll-down-indicator" title="Rolar para o Calendário">
+        <span>Ver Calendário com Feriados</span>
+        <i data-lucide="chevron-down"></i>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- ================= SEÇÃO 2: CALENDÁRIO COM OS FERIADOS ================= -->
+  <section class="calendar-section" id="calendar-section">
+    <div class="calendar-container">
+      
+      <!-- Cabeçalho do Calendário -->
+      <div class="section-title-box">
+        <div class="title-with-icon">
+          <div class="icon-circle"><i data-lucide="calendar-check"></i></div>
+          <div>
+            <h2 class="section-heading">Calendário Letivo & Feriados</h2>
+            <p class="section-desc">Acompanhe todos os dias letivos, feriados nacionais e recessos programados</p>
+          </div>
+        </div>
+
+        <!-- Controles de Mês -->
+        <div class="calendar-nav-group glass-card-sm">
+          <button class="nav-arrow-btn" id="cal-prev" title="Mês Anterior">
+            <i data-lucide="chevron-left"></i>
+          </button>
+          <span class="calendar-month-title" id="cal-month-name">Mês Ano</span>
+          <button class="nav-arrow-btn" id="cal-next" title="Próximo Mês">
+            <i data-lucide="chevron-right"></i>
+          </button>
+          <button class="today-jump-btn" id="cal-today">Hoje</button>
+        </div>
+      </div>
+
+      <!-- Grid Principal: Calendário + Lista de Próximos Feriados -->
+      <div class="calendar-main-grid">
+        
+        <!-- Cartão do Calendário Interativo -->
+        <div class="calendar-card glass-card">
+          
+          <!-- Legenda de Cores Rápida -->
+          <div class="cal-legend-bar">
+            <span class="legend-item"><span class="legend-color color-school"></span> Dia Letivo</span>
+            <span class="legend-item"><span class="legend-color color-today"></span> Hoje</span>
+            <span class="legend-item"><span class="legend-color color-holiday"></span> Feriado / Recesso</span>
+            <span class="legend-item"><span class="legend-color color-weekend"></span> Fim de Semana</span>
+          </div>
+
+          <!-- Cabeçalho Dias da Semana -->
+          <div class="weekdays-grid">
+            <span>DOM</span>
+            <span>SEG</span>
+            <span>TER</span>
+            <span>QUA</span>
+            <span>QUI</span>
+            <span>SEX</span>
+            <span>SÁB</span>
+          </div>
+
+          <!-- Grid dos Dias do Mês -->
+          <div class="days-matrix" id="days-matrix">
+            <!-- Gerado dinamicamente via JS -->
+          </div>
+
+          <!-- Rodapé do Mês -->
+          <div class="calendar-card-footer">
+            <span id="month-summary-text">0 dias letivos neste mês</span>
+            <span class="click-hint"><i data-lucide="mouse-pointer"></i> Clique em um dia para alternar letivo / folga</span>
+          </div>
+        </div>
+
+        <!-- Painel Lateral: Próximos Feriados e Recessos -->
+        <aside class="holidays-side-card glass-card">
+          <div class="side-card-header">
+            <h3 class="side-card-title"><i data-lucide="palmtree"></i> Feriados & Recessos</h3>
+            <button class="btn-add-holiday" id="btn-add-holiday" title="Adicionar Recesso">
+              <i data-lucide="plus"></i> Adicionar
+            </button>
+          </div>
+
+          <div class="holidays-scroll-list" id="holidays-list-container">
+            <!-- Inserido dinamicamente via JS -->
+          </div>
+        </aside>
+
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Rodapé Minimalista -->
+  <footer class="app-footer">
+    <p>Contagem Regressiva de Dias Letivos • Desenvolvido para máxima clareza e produtividade 🎓</p>
+    <div class="footer-clock" id="live-clock">00:00:00</div>
+  </footer>
+
+  <!-- ================= MODAIS ================= -->
+
+  <!-- MODAL: CONFIGURAÇÃO DE DATAS DO CURSO -->
+  <div class="modal-overlay" id="modal-settings">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <h3 class="modal-title"><i data-lucide="sliders"></i> Configurar Contagem</h3>
+        <button class="btn-icon-close modal-close"><i data-lucide="x"></i></button>
+      </div>
+      
+      <form id="settings-form">
+        <div class="form-group">
+          <label for="input-course-title">Título / Curso / Turma:</label>
+          <input type="text" id="input-course-title" class="form-input" placeholder="Ex: Técnico em Informática / Ano Letivo">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="input-start-date">Data de Início:</label>
+            <input type="date" id="input-start-date" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label for="input-end-date">Data Prevista de Término:</label>
+            <input type="date" id="input-end-date" class="form-input" required>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="input-daily-hours">Horas de aula por dia:</label>
+            <input type="number" id="input-daily-hours" class="form-input" min="1" max="12" step="0.5" value="4">
+          </div>
+          <div class="form-group">
+            <label>Dias de Aula na Semana:</label>
+            <div class="weekdays-picker">
+              <label class="day-chip"><input type="checkbox" id="chk-mon" value="1" checked> <span>Seg</span></label>
+              <label class="day-chip"><input type="checkbox" id="chk-tue" value="2" checked> <span>Ter</span></label>
+              <label class="day-chip"><input type="checkbox" id="chk-wed" value="3" checked> <span>Qua</span></label>
+              <label class="day-chip"><input type="checkbox" id="chk-thu" value="4" checked> <span>Qui</span></label>
+              <label class="day-chip"><input type="checkbox" id="chk-fri" value="5" checked> <span>Sex</span></label>
+              <label class="day-chip"><input type="checkbox" id="chk-sat" value="6"> <span>Sáb</span></label>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary modal-close">Cancelar</button>
+          <button type="submit" class="btn-primary"><i data-lucide="check"></i> Salvar Alterações</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADICIONAR / EDITAR FERIADO OU RECESSO -->
+  <div class="modal-overlay" id="modal-holiday">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <h3 class="modal-title" id="holiday-modal-title"><i data-lucide="palmtree"></i> Adicionar Feriado / Recesso</h3>
+        <button class="btn-icon-close modal-close"><i data-lucide="x"></i></button>
+      </div>
+
+      <form id="form-holiday">
+        <input type="hidden" id="holiday-id">
+        <div class="form-group">
+          <label for="holiday-name">Nome do Feriado / Recesso *</label>
+          <input type="text" id="holiday-name" class="form-input" placeholder="Ex: Recesso Escolar de Julho" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="holiday-start">Data de Início *</label>
+            <input type="date" id="holiday-start" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label for="holiday-end">Data de Fim (ou deixe vazio p/ 1 dia)</label>
+            <input type="date" id="holiday-end" class="form-input">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary modal-close">Cancelar</button>
+          <button type="submit" class="btn-primary"><i data-lucide="check"></i> Salvar Recesso</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: SELETOR DE TEMAS -->
+  <div class="modal-overlay" id="modal-theme">
+    <div class="modal-card glass-card">
+      <div class="modal-header">
+        <h3 class="modal-title"><i data-lucide="palette"></i> Escolha a Estética Visual</h3>
+        <button class="btn-icon-close modal-close"><i data-lucide="x"></i></button>
+      </div>
+      
+      <div class="themes-grid">
+        <button class="theme-option active" data-theme-id="aurora-dark">
+          <div class="theme-dots">
+            <span style="background: #6366f1;"></span>
+            <span style="background: #06b6d4;"></span>
+            <span style="background: #090d16;"></span>
+          </div>
+          <h4>Aurora Cyber</h4>
+          <p>Profundo com brilhos ciano e neon</p>
+        </button>
+
+        <button class="theme-option" data-theme-id="deep-space">
+          <div class="theme-dots">
+            <span style="background: #3b82f6;"></span>
+            <span style="background: #8b5cf6;"></span>
+            <span style="background: #030712;"></span>
+          </div>
+          <h4>Deep Space</h4>
+          <p>Azul cósmico e roxo estelar</p>
+        </button>
+
+        <button class="theme-option" data-theme-id="emerald-night">
+          <div class="theme-dots">
+            <span style="background: #10b981;"></span>
+            <span style="background: #34d399;"></span>
+            <span style="background: #04120e;"></span>
+          </div>
+          <h4>Emerald Night</h4>
+          <p>Verde esmeralda focado</p>
+        </button>
+
+        <button class="theme-option" data-theme-id="sunset-dream">
+          <div class="theme-dots">
+            <span style="background: #f97316;"></span>
+            <span style="background: #ec4899;"></span>
+            <span style="background: #150919;"></span>
+          </div>
+          <h4>Sunset Dream</h4>
+          <p>Gradientes quentes do entardecer</p>
+        </button>
+
+        <button class="theme-option" data-theme-id="clean-light">
+          <div class="theme-dots">
+            <span style="background: #4f46e5;"></span>
+            <span style="background: #0ea5e9;"></span>
+            <span style="background: #ffffff;"></span>
+          </div>
+          <h4>Clean Light</h4>
+          <p>Visual claro e moderno</p>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- JavaScript -->
+  <script src="app.js"></script>
+</body>
+</html>
