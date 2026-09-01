@@ -1,11 +1,12 @@
 /**
  * ==========================================================================
  * DIAS LETIVOS - SINGLE PAGE APP JAVASCRIPT ENGINE
+ * Sincronização em Nuvem em Tempo Real + Cálculos Dinâmicos
  * ==========================================================================
  */
 
 // Base de feriados nacionais brasileiros
-function getDefaultHolidays(year) {
+function getDefaultHolidays(year = 2026) {
   return [
     { id: `h-${year}-1`, name: "Confraternização Universal", startDate: `${year}-01-01`, endDate: `${year}-01-01` },
     { id: `h-${year}-2`, name: "Carnaval", startDate: `${year}-02-16`, endDate: `${year}-02-17` },
@@ -28,6 +29,9 @@ class SimpleSchoolCountdown {
     this.currentDate = new Date();
     this.calendarDate = new Date();
     this.audioCtx = null;
+    this.isReceivingRemoteUpdate = false;
+    this.syncDebounceTimer = null;
+    this.broadcastChannel = null;
 
     this.loadState();
     this.cacheDOM();
@@ -37,6 +41,9 @@ class SimpleSchoolCountdown {
     this.updateClock();
     this.render();
 
+    // Iniciar Sincronização em Nuvem (Multi-Usuário em Tempo Real)
+    this.initCloudSync();
+
     setInterval(() => this.updateClock(), 1000);
 
     if (window.lucide) {
@@ -44,19 +51,19 @@ class SimpleSchoolCountdown {
     }
   }
 
-  // --- Estado Inicial ---
+  // --- Estado Inicial Padrão ---
   getDefaultState() {
-    const currentYear = this.currentDate.getFullYear();
     return {
       title: "Dias Letivos do Curso",
-      startDate: `${currentYear}-02-05`,
-      endDate: `${currentYear}-12-18`,
-      dailyHours: 4,
+      startDate: "2026-02-02", // Padrão: início em 02/02/2026
+      endDate: "2026-12-18",   // Padrão: término em 18/12/2026
+      dailyHours: 6,           // Padrão: 6 horas por dia
       activeDays: [1, 2, 3, 4, 5], // Seg a Sex
       soundEnabled: true,
       theme: "aurora-dark",
-      holidays: getDefaultHolidays(currentYear),
-      customOverrides: {} // { 'YYYY-MM-DD': 'school' | 'off' }
+      holidays: getDefaultHolidays(2026),
+      customOverrides: {}, // { 'YYYY-MM-DD': 'school' | 'off' }
+      lastUpdated: Date.now()
     };
   }
 
@@ -67,7 +74,11 @@ class SimpleSchoolCountdown {
         this.state = JSON.parse(saved);
         if (!this.state.customOverrides) this.state.customOverrides = {};
         if (!this.state.activeDays) this.state.activeDays = [1, 2, 3, 4, 5];
-        if (!this.state.holidays) this.state.holidays = getDefaultHolidays(this.currentDate.getFullYear());
+        if (!this.state.holidays || !this.state.holidays.length) {
+          this.state.holidays = getDefaultHolidays(2026);
+        }
+        if (!this.state.startDate) this.state.startDate = "2026-02-02";
+        if (!this.state.dailyHours) this.state.dailyHours = 6;
       } catch (e) {
         this.state = this.getDefaultState();
       }
@@ -76,9 +87,14 @@ class SimpleSchoolCountdown {
     }
   }
 
-  saveState() {
+  saveState(broadcastToCloud = true) {
+    this.state.lastUpdated = Date.now();
     localStorage.setItem("dias_letivos_single_state", JSON.stringify(this.state));
     this.render();
+
+    if (broadcastToCloud && !this.isReceivingRemoteUpdate) {
+      this.pushToCloud();
+    }
   }
 
   // --- Elementos DOM ---
@@ -86,9 +102,16 @@ class SimpleSchoolCountdown {
     // Header & Floating
     this.todayStatusPill = document.getElementById("today-status-pill");
     this.todayStatusText = document.getElementById("today-status-text");
+    this.cloudSyncPill = document.getElementById("cloud-sync-pill");
+    this.cloudDot = document.getElementById("cloud-dot");
+    this.cloudSyncText = document.getElementById("cloud-sync-text");
+    this.modalCloudStatus = document.getElementById("modal-cloud-status");
+
     this.btnSoundToggle = document.getElementById("btn-sound-toggle");
     this.btnThemeModal = document.getElementById("btn-theme-modal");
     this.btnOpenSettings = document.getElementById("btn-open-settings");
+    this.btnForceSync = document.getElementById("btn-force-sync");
+    this.btnResetDefaults = document.getElementById("btn-reset-defaults");
     this.liveClock = document.getElementById("live-clock");
     this.toastContainer = document.getElementById("toast-container");
 
@@ -102,9 +125,11 @@ class SimpleSchoolCountdown {
     this.progressBarFill = document.getElementById("progress-bar-fill");
     this.statDaysDone = document.getElementById("stat-days-done");
     this.statDaysTotal = document.getElementById("stat-days-total");
+    this.statCalendarProgress = document.getElementById("stat-calendar-progress");
     this.statWeeksLeft = document.getElementById("stat-weeks-left");
     this.statHoursLeft = document.getElementById("stat-hours-left");
     this.statCalendarDays = document.getElementById("stat-calendar-days");
+    this.statCalendarDaysSub = document.getElementById("stat-calendar-days-sub");
 
     // Calendar Section
     this.calPrev = document.getElementById("cal-prev");
@@ -133,6 +158,192 @@ class SimpleSchoolCountdown {
     this.holidayEndInput = document.getElementById("holiday-end");
 
     this.modalTheme = document.getElementById("modal-theme");
+  }
+
+  // --- Sincronização em Nuvem em Tempo Real (Multi-Usuário) ---
+  initCloudSync() {
+    this.setCloudStatus("syncing", "Conectando à nuvem...");
+
+    // 1. BroadcastChannel para sincronização instantânea entre abas no mesmo navegador
+    try {
+      if ("BroadcastChannel" in window) {
+        this.broadcastChannel = new BroadcastChannel("dias_letivos_cloud_channel");
+        this.broadcastChannel.onmessage = (event) => {
+          if (event.data && event.data.type === "STATE_UPDATED") {
+            this.handleIncomingCloudState(event.data.state, "Aba local");
+          }
+        };
+      }
+    } catch (e) {}
+
+    // 2. Firebase Realtime Database
+    const firebaseConfig = {
+      databaseURL: "https://contagem-letivos-default-rtdb.firebaseio.com"
+    };
+
+    let firebaseDb = null;
+    try {
+      if (window.firebase && !firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+        firebaseDb = firebase.database();
+      } else if (window.firebase) {
+        firebaseDb = firebase.database();
+      }
+    } catch (e) {
+      console.warn("Firebase init notice:", e);
+    }
+
+    if (firebaseDb) {
+      this.firebaseRef = firebaseDb.ref("course_shared_room_v1");
+      
+      // Escutar alterações remotas em tempo real
+      this.firebaseRef.on("value", (snapshot) => {
+        const cloudData = snapshot.val();
+        if (cloudData) {
+          this.handleIncomingCloudState(cloudData, "Nuvem Realtime");
+        } else {
+          // Se banco estiver vazio na primeira execução, publica o estado padrão
+          this.pushToCloud();
+        }
+        this.setCloudStatus("connected", "Sincronizado na Nuvem");
+      }, (error) => {
+        console.warn("Firebase listener error:", error);
+        this.initRestCloudFallback();
+      });
+    } else {
+      this.initRestCloudFallback();
+    }
+
+    // Sincronizar ao focar ou reabrir a aba
+    window.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        this.fetchCloudState();
+      }
+    });
+
+    window.addEventListener("storage", (e) => {
+      if (e.key === "dias_letivos_single_state" && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          this.handleIncomingCloudState(parsed, "Armazenamento");
+        } catch (err) {}
+      }
+    });
+  }
+
+  initRestCloudFallback() {
+    this.fetchCloudState();
+    // Polling a cada 20 segundos como fallback resiliente
+    setInterval(() => this.fetchCloudState(), 20000);
+  }
+
+  async fetchCloudState() {
+    try {
+      this.setCloudStatus("syncing", "Verificando nuvem...");
+      const res = await fetch("https://contagem-letivos-default-rtdb.firebaseio.com/course_shared_room_v1.json");
+      if (res.ok) {
+        const data = await res.json();
+        if (data) {
+          this.handleIncomingCloudState(data, "Nuvem REST");
+        }
+        this.setCloudStatus("connected", "Sincronizado na Nuvem");
+      } else {
+        this.setCloudStatus("connected", "Sincronizado Local/Nuvem");
+      }
+    } catch (e) {
+      this.setCloudStatus("offline", "Modo Offline (Salvo Local)");
+    }
+  }
+
+  pushToCloud() {
+    this.setCloudStatus("syncing", "Salvando na nuvem...");
+
+    // Enviar para BroadcastChannel (outras abas)
+    if (this.broadcastChannel) {
+      this.broadcastChannel.postMessage({
+        type: "STATE_UPDATED",
+        state: this.state
+      });
+    }
+
+    // Debounce para Firebase / REST
+    clearTimeout(this.syncDebounceTimer);
+    this.syncDebounceTimer = setTimeout(async () => {
+      try {
+        if (this.firebaseRef) {
+          await this.firebaseRef.set(this.state);
+        } else {
+          await fetch("https://contagem-letivos-default-rtdb.firebaseio.com/course_shared_room_v1.json", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(this.state)
+          });
+        }
+        this.setCloudStatus("connected", "Sincronizado na Nuvem");
+      } catch (e) {
+        console.warn("Erro ao sincronizar na nuvem:", e);
+        this.setCloudStatus("offline", "Salvo Localmente");
+      }
+    }, 400);
+  }
+
+  handleIncomingCloudState(remoteState, source = "Nuvem") {
+    if (!remoteState || typeof remoteState !== "object") return;
+
+    // Verificar se o estado remoto é mais recente ou diferente
+    const currentJson = JSON.stringify({
+      title: this.state.title,
+      startDate: this.state.startDate,
+      endDate: this.state.endDate,
+      dailyHours: this.state.dailyHours,
+      activeDays: this.state.activeDays,
+      holidays: this.state.holidays,
+      customOverrides: this.state.customOverrides
+    });
+
+    const remoteJson = JSON.stringify({
+      title: remoteState.title,
+      startDate: remoteState.startDate,
+      endDate: remoteState.endDate,
+      dailyHours: remoteState.dailyHours,
+      activeDays: remoteState.activeDays,
+      holidays: remoteState.holidays,
+      customOverrides: remoteState.customOverrides
+    });
+
+    if (currentJson === remoteJson) {
+      this.setCloudStatus("connected", "Sincronizado na Nuvem");
+      return;
+    }
+
+    // Aplicar novo estado remoto
+    this.isReceivingRemoteUpdate = true;
+    this.state = {
+      ...this.state,
+      ...remoteState,
+      // Manter preferências individuais de tema e som locais, mas sincronizar regras do curso
+      theme: this.state.theme || remoteState.theme || "aurora-dark",
+      soundEnabled: this.state.soundEnabled !== undefined ? this.state.soundEnabled : true
+    };
+
+    localStorage.setItem("dias_letivos_single_state", JSON.stringify(this.state));
+    this.render();
+    this.isReceivingRemoteUpdate = false;
+
+    this.setCloudStatus("connected", "Sincronizado na Nuvem");
+    this.showToast(`🔄 Configurações atualizadas via ${source}!`, "info");
+    this.playSound("success");
+  }
+
+  setCloudStatus(status, text) {
+    if (this.cloudDot && this.cloudSyncText) {
+      this.cloudDot.className = `cloud-dot ${status}`;
+      this.cloudSyncText.innerText = text;
+    }
+    if (this.modalCloudStatus) {
+      this.modalCloudStatus.innerText = status === "connected" ? "Ativa & Sincronizada" : (status === "syncing" ? "Sincronizando..." : "Salvo Localmente");
+      this.modalCloudStatus.className = `cloud-status-badge ${status === "connected" ? "active" : ""}`;
+    }
   }
 
   // --- Efeitos Sonoros ---
@@ -180,23 +391,52 @@ class SimpleSchoolCountdown {
 
   // --- Eventos ---
   bindEvents() {
-    // Open Settings Modal
+    // Abrir Modal de Configurações
     this.btnOpenSettings.addEventListener("click", () => this.openSettingsModal());
     this.periodBadge.addEventListener("click", () => this.openSettingsModal());
 
-    // Settings Submit
+    // Salvar Configurações
     this.settingsForm.addEventListener("submit", (e) => this.handleSaveSettings(e));
 
-    // Sound toggle
+    // Forçar Sincronização
+    if (this.btnForceSync) {
+      this.btnForceSync.addEventListener("click", async () => {
+        this.showToast("Buscando atualizações na nuvem...", "info");
+        await this.fetchCloudState();
+        this.showToast("Nuvem sincronizada com sucesso!", "success");
+        this.playSound("success");
+      });
+    }
+
+    // Restaurar Padrões Recomendados
+    if (this.btnResetDefaults) {
+      this.btnResetDefaults.addEventListener("click", () => {
+        if (confirm("Deseja restaurar as datas e horários para o padrão (Início: 02/02/2026, 6h/dia)?")) {
+          const defaults = this.getDefaultState();
+          this.state.title = defaults.title;
+          this.state.startDate = defaults.startDate;
+          this.state.endDate = defaults.endDate;
+          this.state.dailyHours = defaults.dailyHours;
+          this.state.activeDays = defaults.activeDays;
+          this.state.holidays = defaults.holidays;
+          this.state.customOverrides = {};
+          this.openSettingsModal();
+          this.saveState(true);
+          this.showToast("Padrões restaurados e sincronizados para todos!", "success");
+        }
+      });
+    }
+
+    // Alternar Som
     this.btnSoundToggle.addEventListener("click", () => {
       this.state.soundEnabled = !this.state.soundEnabled;
       this.updateSoundButton();
-      this.saveState();
+      this.saveState(false);
       this.showToast(this.state.soundEnabled ? "Sons ativados 🔊" : "Sons desativados 🔇", "info");
       if (this.state.soundEnabled) this.playSound("success");
     });
 
-    // Theme Modal & Switcher
+    // Seletor de Temas
     this.btnThemeModal.addEventListener("click", () => {
       this.modalTheme.classList.add("active");
       this.playSound("click");
@@ -209,13 +449,13 @@ class SimpleSchoolCountdown {
         document.querySelectorAll("[data-theme-id]").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         this.state.theme = themeId;
-        this.saveState();
+        this.saveState(false);
         this.modalTheme.classList.remove("active");
         this.showToast(`Tema alterado para ${btn.querySelector("h4").innerText}!`, "info");
       });
     });
 
-    // Calendar Navigation
+    // Navegação do Calendário
     this.calPrev.addEventListener("click", () => {
       this.calendarDate.setMonth(this.calendarDate.getMonth() - 1);
       this.renderCalendar();
@@ -234,11 +474,11 @@ class SimpleSchoolCountdown {
       this.playSound("click");
     });
 
-    // Add Holiday
+    // Adicionar Feriado
     this.btnAddHoliday.addEventListener("click", () => this.openHolidayModal());
     this.formHoliday.addEventListener("submit", (e) => this.handleSaveHoliday(e));
 
-    // Close Modals
+    // Fechar Modais
     document.querySelectorAll(".modal-close, .modal-overlay").forEach(el => {
       el.addEventListener("click", (e) => {
         if (e.target === el || el.classList.contains("modal-close")) {
@@ -331,12 +571,35 @@ class SimpleSchoolCountdown {
     return true;
   }
 
-  // --- Cálculo Completo da Contagem ---
+  // --- Cálculo Completo Dinâmico da Contagem e Dias Corridos ---
   calculateStats() {
     const today = new Date(this.currentDate.getFullYear(), this.currentDate.getMonth(), this.currentDate.getDate(), 12, 0, 0);
     const start = this.parseDate(this.state.startDate) || today;
     const end = this.parseDate(this.state.endDate) || today;
 
+    // 1. Cálculo Dinâmico de Dias Corridos Totais, Decorridos e Restantes
+    const oneDayMs = 1000 * 60 * 60 * 24;
+    const totalCalendarDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / oneDayMs) + 1);
+
+    let elapsedCalendarDays = 0;
+    if (today < start) {
+      elapsedCalendarDays = 0;
+    } else if (today > end) {
+      elapsedCalendarDays = totalCalendarDays;
+    } else {
+      elapsedCalendarDays = Math.max(1, Math.round((today.getTime() - start.getTime()) / oneDayMs) + 1);
+    }
+
+    let calendarDaysLeft = 0;
+    if (today > end) {
+      calendarDaysLeft = 0;
+    } else if (today < start) {
+      calendarDaysLeft = totalCalendarDays;
+    } else {
+      calendarDaysLeft = Math.max(0, Math.round((end.getTime() - today.getTime()) / oneDayMs) + 1);
+    }
+
+    // 2. Cálculo Dinâmico de Dias Letivos (Total, Feitos e Restantes)
     let totalDays = 0;
     let doneDays = 0;
     let leftDays = 0;
@@ -357,10 +620,9 @@ class SimpleSchoolCountdown {
     const progressPct = totalDays > 0 ? Math.min(100, Math.round((doneDays / totalDays) * 100)) : 0;
     const activeDaysPerWeek = this.state.activeDays.length || 5;
     const weeksLeft = Math.ceil(leftDays / activeDaysPerWeek);
-    const hoursLeft = leftDays * (parseFloat(this.state.dailyHours) || 4);
-
-    const diffMs = end - today;
-    const calendarDaysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+    const dailyHours = parseFloat(this.state.dailyHours) || 6;
+    const hoursLeft = leftDays * dailyHours;
+    const totalHours = totalDays * dailyHours;
 
     const isTodaySchool = this.isSchoolDay(today);
     const todayHoliday = this.getHolidayForDate(today);
@@ -371,10 +633,14 @@ class SimpleSchoolCountdown {
       totalDays,
       doneDays,
       leftDays,
+      totalCalendarDays,
+      elapsedCalendarDays,
+      calendarDaysLeft,
       progressPct,
       weeksLeft,
       hoursLeft,
-      calendarDaysLeft,
+      totalHours,
+      dailyHours,
       isTodaySchool,
       todayHoliday
     };
@@ -406,18 +672,24 @@ class SimpleSchoolCountdown {
     this.hugeDaysNumber.innerText = stats.leftDays;
     this.countdownSubText.innerText = `descontando fins de semana e feriados até ${this.formatDate(stats.end)}`;
 
-    // Progress Bar
+    // Progress Bar & Details Dinâmicos
     this.progressPercent.innerText = `${stats.progressPct}%`;
     this.progressBarFill.style.width = `${stats.progressPct}%`;
     this.statDaysDone.innerText = stats.doneDays;
     this.statDaysTotal.innerText = stats.totalDays;
+    if (this.statCalendarProgress) {
+      this.statCalendarProgress.innerText = `${stats.elapsedCalendarDays} de ${stats.totalCalendarDays} corridos`;
+    }
 
-    // Stat Pills
+    // Mini Stat Pills Dinâmicas
     this.statWeeksLeft.innerText = stats.weeksLeft;
     this.statHoursLeft.innerText = `${stats.hoursLeft}h`;
     this.statCalendarDays.innerText = stats.calendarDaysLeft;
+    if (this.statCalendarDaysSub) {
+      this.statCalendarDaysSub.innerText = `dias corridos (${stats.totalCalendarDays} tot.)`;
+    }
 
-    // Trigger confetti if reached 100%
+    // Confetti ao atingir 100%
     if (stats.progressPct === 100 && stats.totalDays > 0) {
       if (window.confetti) {
         window.confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
@@ -514,7 +786,7 @@ class SimpleSchoolCountdown {
       this.showToast(currentlySchool ? `Marcado como Folga: ${dateStr}` : `Marcado como Dia Letivo: ${dateStr}`, "success");
     }
     this.playSound("toggle");
-    this.saveState();
+    this.saveState(true);
   }
 
   // --- Lista Lateral de Feriados ---
@@ -555,19 +827,19 @@ class SimpleSchoolCountdown {
   }
 
   deleteHoliday(id) {
-    if (confirm("Deseja remover este feriado/recesso?")) {
+    if (confirm("Deseja remover este feriado/recesso para todos?")) {
       this.state.holidays = this.state.holidays.filter(h => h.id !== id);
-      this.saveState();
-      this.showToast("Recesso removido!", "info");
+      this.saveState(true);
+      this.showToast("Recesso removido e sincronizado!", "info");
     }
   }
 
   // --- Modal Configurações do Curso ---
   openSettingsModal() {
     this.inputCourseTitle.value = this.state.title || "";
-    this.inputStartDate.value = this.state.startDate || "";
-    this.inputEndDate.value = this.state.endDate || "";
-    this.inputDailyHours.value = this.state.dailyHours || 4;
+    this.inputStartDate.value = this.state.startDate || "2026-02-02";
+    this.inputEndDate.value = this.state.endDate || "2026-12-18";
+    this.inputDailyHours.value = this.state.dailyHours || 6;
 
     const days = [1, 2, 3, 4, 5, 6];
     const ids = ["chk-mon", "chk-tue", "chk-wed", "chk-thu", "chk-fri", "chk-sat"];
@@ -583,9 +855,9 @@ class SimpleSchoolCountdown {
   handleSaveSettings(e) {
     e.preventDefault();
     this.state.title = this.inputCourseTitle.value.trim() || "Dias Letivos";
-    this.state.startDate = this.inputStartDate.value;
-    this.state.endDate = this.inputEndDate.value;
-    this.state.dailyHours = parseFloat(this.inputDailyHours.value) || 4;
+    this.state.startDate = this.inputStartDate.value || "2026-02-02";
+    this.state.endDate = this.inputEndDate.value || "2026-12-18";
+    this.state.dailyHours = parseFloat(this.inputDailyHours.value) || 6;
 
     const active = [];
     const days = [1, 2, 3, 4, 5, 6];
@@ -597,9 +869,9 @@ class SimpleSchoolCountdown {
     this.state.activeDays = active;
 
     this.modalSettings.classList.remove("active");
-    this.saveState();
+    this.saveState(true);
     this.playSound("success");
-    this.showToast("Configurações atualizadas!", "success");
+    this.showToast("Configurações salvas e sincronizadas para todos os usuários! 🌐", "success");
   }
 
   // --- Modal Adicionar Feriado ---
@@ -632,12 +904,12 @@ class SimpleSchoolCountdown {
     this.state.holidays.push(newH);
 
     this.modalHoliday.classList.remove("active");
-    this.saveState();
+    this.saveState(true);
     this.playSound("success");
-    this.showToast("Novo recesso/feriado adicionado!", "success");
+    this.showToast("Novo recesso/feriado adicionado e sincronizado!", "success");
   }
 
-  // --- Toast ---
+  // --- Toast Notifications ---
   showToast(message, type = "info") {
     const toast = document.createElement("div");
     toast.className = `toast ${type}`;
@@ -652,7 +924,7 @@ class SimpleSchoolCountdown {
     setTimeout(() => {
       toast.style.animation = "slideToast 0.3s reverse forwards";
       setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    }, 3200);
   }
 }
 

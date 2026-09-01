@@ -15,6 +15,9 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <!-- Canvas Confetti -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <!-- Firebase App & Realtime Database CDN (Compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
   <link rel="stylesheet" href="style.css">
 </head>
@@ -29,9 +32,17 @@
 
   <!-- Botões Flutuantes Rápidos no Canto Superior -->
   <header class="floating-header">
-    <div class="status-pill" id="today-status-pill">
-      <span class="status-dot"></span>
-      <span id="today-status-text">Calculando hoje...</span>
+    <div class="header-left-badges">
+      <div class="status-pill" id="today-status-pill">
+        <span class="status-dot"></span>
+        <span id="today-status-text">Calculando hoje...</span>
+      </div>
+      
+      <!-- Indicador de Sincronização em Nuvem (Compartilhado com Todos) -->
+      <div class="status-pill cloud-sync-pill" id="cloud-sync-pill" title="Status da sincronização em tempo real">
+        <span class="cloud-dot syncing" id="cloud-dot"></span>
+        <span id="cloud-sync-text">Sincronizando...</span>
+      </div>
     </div>
     
     <div class="floating-actions">
@@ -41,7 +52,7 @@
       <button class="glass-btn-icon" id="btn-theme-modal" title="Alterar Tema Visual">
         <i data-lucide="palette"></i>
       </button>
-      <button class="glass-btn-icon" id="btn-open-settings" title="Configurar Datas e Aulas">
+      <button class="glass-btn-icon" id="btn-open-settings" title="Configurar Datas, Horas e Nuvem">
         <i data-lucide="settings"></i>
       </button>
     </div>
@@ -79,32 +90,33 @@
             <div class="progress-bar-fill" id="progress-bar-fill" style="width: 0%;"></div>
           </div>
           <div class="progress-details-row">
-            <span>Já foram: <strong id="stat-days-done">0</strong> dias</span>
-            <span>Total previsto: <strong id="stat-days-total">0</strong> dias</span>
+            <span>Letivos concluídos: <strong id="stat-days-done">0</strong> dias</span>
+            <span>Dias corridos: <strong id="stat-calendar-progress">0 de 0 corridos</strong></span>
+            <span>Total letivo: <strong id="stat-days-total">0</strong> dias</span>
           </div>
         </div>
 
         <!-- Mini Pílulas de Estatísticas Rápidas -->
         <div class="stats-pills-row">
-          <div class="stat-pill">
+          <div class="stat-pill" title="Semanas letivas restantes">
             <i data-lucide="calendar"></i>
             <div>
               <strong id="stat-weeks-left">--</strong>
               <small>semanas</small>
             </div>
           </div>
-          <div class="stat-pill">
+          <div class="stat-pill" title="Total de horas de aula restantes calculadas">
             <i data-lucide="clock"></i>
             <div>
               <strong id="stat-hours-left">--h</strong>
-              <small>horas de aula</small>
+              <small>horas restantes</small>
             </div>
           </div>
-          <div class="stat-pill">
+          <div class="stat-pill" id="pill-calendar-days" title="Dias corridos até o término do curso">
             <i data-lucide="calendar-days"></i>
             <div>
               <strong id="stat-calendar-days">--</strong>
-              <small>dias corridos</small>
+              <small id="stat-calendar-days-sub">dias corridos</small>
             </div>
           </div>
         </div>
@@ -215,7 +227,7 @@
   <div class="modal-overlay" id="modal-settings">
     <div class="modal-card glass-card">
       <div class="modal-header">
-        <h3 class="modal-title"><i data-lucide="sliders"></i> Configurar Contagem</h3>
+        <h3 class="modal-title"><i data-lucide="sliders"></i> Configurar Contagem & Nuvem</h3>
         <button class="btn-icon-close modal-close"><i data-lucide="x"></i></button>
       </div>
       
@@ -227,7 +239,7 @@
 
         <div class="form-row">
           <div class="form-group">
-            <label for="input-start-date">Data de Início:</label>
+            <label for="input-start-date">Data de Início do Curso:</label>
             <input type="date" id="input-start-date" class="form-input" required>
           </div>
           <div class="form-group">
@@ -239,7 +251,7 @@
         <div class="form-row">
           <div class="form-group">
             <label for="input-daily-hours">Horas de aula por dia:</label>
-            <input type="number" id="input-daily-hours" class="form-input" min="1" max="12" step="0.5" value="4">
+            <input type="number" id="input-daily-hours" class="form-input" min="1" max="12" step="0.5" value="6">
           </div>
           <div class="form-group">
             <label>Dias de Aula na Semana:</label>
@@ -254,9 +266,31 @@
           </div>
         </div>
 
+        <!-- Seção de Nuvem Compartilhada -->
+        <div class="cloud-settings-box">
+          <div class="cloud-settings-header">
+            <div class="cloud-badge-status">
+              <i data-lucide="cloud"></i>
+              <strong>Sincronização Compartilhada (Para Todos)</strong>
+            </div>
+            <span class="cloud-status-badge active" id="modal-cloud-status">Ativa</span>
+          </div>
+          <p class="cloud-info-text">
+            Ao salvar, as alterações são aplicadas <strong>automaticamente para todos os alunos e professores</strong> que acessarem o link em tempo real.
+          </p>
+          <div class="cloud-actions-row">
+            <button type="button" class="btn-cloud-sync" id="btn-force-sync" title="Buscar atualizações mais recentes da nuvem">
+              <i data-lucide="refresh-cw"></i> Sincronizar Agora
+            </button>
+            <button type="button" class="btn-cloud-sync secondary" id="btn-reset-defaults" title="Restaurar valores padrão recomendados">
+              <i data-lucide="rotate-ccw"></i> Restaurar Padrão
+            </button>
+          </div>
+        </div>
+
         <div class="modal-footer">
           <button type="button" class="btn-secondary modal-close">Cancelar</button>
-          <button type="submit" class="btn-primary"><i data-lucide="check"></i> Salvar Alterações</button>
+          <button type="submit" class="btn-primary"><i data-lucide="check"></i> Salvar e Sincronizar p/ Todos</button>
         </div>
       </form>
     </div>

@@ -312,6 +312,13 @@ body {
   pointer-events: auto;
 }
 
+.header-left-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -326,6 +333,41 @@ body {
   font-weight: 600;
   color: var(--text-main);
   box-shadow: var(--card-shadow);
+  user-select: none;
+}
+
+.cloud-sync-pill {
+  background: rgba(16, 22, 38, 0.8);
+  border-color: rgba(99, 102, 241, 0.25);
+  font-size: 0.8rem;
+  padding: 0.4rem 0.85rem;
+  transition: all 0.25s ease;
+}
+
+.cloud-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-emerald);
+  box-shadow: 0 0 10px var(--accent-emerald);
+  animation: pulseDot 2s infinite;
+}
+
+.cloud-dot.syncing {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 10px var(--accent-cyan);
+  animation: pulseSyncing 1s infinite;
+}
+
+.cloud-dot.offline {
+  background: var(--accent-amber);
+  box-shadow: 0 0 8px var(--accent-amber);
+}
+
+@keyframes pulseSyncing {
+  0% { transform: scale(0.85); opacity: 0.6; }
+  50% { transform: scale(1.35); opacity: 1; }
+  100% { transform: scale(0.85); opacity: 0.6; }
 }
 
 .status-dot {
@@ -1167,6 +1209,100 @@ body {
   border-color: var(--primary);
   color: var(--primary);
   font-weight: 700;
+}
+
+/* Cloud Settings Box inside Modal */
+.cloud-settings-box {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 0.85rem;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cloud-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cloud-badge-status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  color: var(--text-main);
+}
+
+.cloud-badge-status i {
+  width: 16px;
+  height: 16px;
+  color: var(--accent-cyan);
+}
+
+.cloud-status-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 1rem;
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-emerald);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.cloud-info-text {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.cloud-info-text strong {
+  color: var(--accent-cyan);
+}
+
+.cloud-actions-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.btn-cloud-sync {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: var(--text-main);
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.2s ease;
+}
+
+.btn-cloud-sync i {
+  width: 14px;
+  height: 14px;
+}
+
+.btn-cloud-sync:hover {
+  background: rgba(99, 102, 241, 0.3);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.btn-cloud-sync.secondary {
+  background: var(--bg-subtle);
+  border-color: var(--border-glass);
+  color: var(--text-muted);
+}
+
+.btn-cloud-sync.secondary:hover {
+  color: var(--text-main);
+  border-color: var(--border-glass-bright);
 }
 
 .modal-footer {
