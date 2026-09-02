@@ -1,0 +1,8 @@
+{
+  "project_name": "Contagem_Regressiva",
+  "project_id": "azrcngbzhwoxgwubcjvm",
+  "region": "sa-east-1 (São Paulo)",
+  "supabase_url": "https://azrcngbzhwoxgwubcjvm.supabase.co",
+  "publishable_key": "sb_publishable_cjgfMqIIlO85u2xAIqfabQ_tcbMZ19i",
+  "table_name": "countdown_data"
+}

@@ -1,11 +1,15 @@
 /**
  * ==========================================================================
  * DIAS LETIVOS - SINGLE PAGE APP JAVASCRIPT ENGINE
- * Sincronização em Nuvem em Tempo Real + Cálculos Dinâmicos
+ * Sincronização em Nuvem em Tempo Real com Supabase + Cálculos Dinâmicos
  * ==========================================================================
  */
 
-// Base de feriados nacionais brasileiros
+// Configuração do Supabase (Novo Projeto: Contagem_Regressiva)
+const SUPABASE_URL = "https://azrcngbzhwoxgwubcjvm.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF6cmNuZ2J6aHdveGd3dWJjanZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzNTA2MTksImV4cCI6MjEwMzkyNjYxOX0.szZWzrZwfuaxrAq41FLBOhMvmk4XFxMxoFUsRcsnyHg";
+
+// Base de feriados nacionais brasileiros padrão
 function getDefaultHolidays(year = 2026) {
   return [
     { id: `h-${year}-1`, name: "Confraternização Universal", startDate: `${year}-01-01`, endDate: `${year}-01-01` },
@@ -32,6 +36,7 @@ class SimpleSchoolCountdown {
     this.isReceivingRemoteUpdate = false;
     this.syncDebounceTimer = null;
     this.broadcastChannel = null;
+    this.supabase = null;
 
     this.loadState();
     this.cacheDOM();
@@ -41,7 +46,7 @@ class SimpleSchoolCountdown {
     this.updateClock();
     this.render();
 
-    // Iniciar Sincronização em Nuvem (Multi-Usuário em Tempo Real)
+    // Iniciar Sincronização em Nuvem (Supabase + Multi-usuários em Tempo Real)
     this.initCloudSync();
 
     setInterval(() => this.updateClock(), 1000);
@@ -55,14 +60,14 @@ class SimpleSchoolCountdown {
   getDefaultState() {
     return {
       title: "Dias Letivos do Curso",
-      startDate: "2026-02-02", // Padrão: início em 02/02/2026
-      endDate: "2026-12-18",   // Padrão: término em 18/12/2026
-      dailyHours: 6,           // Padrão: 6 horas por dia
+      startDate: "2026-02-05",
+      endDate: "2026-12-18",
+      dailyHours: 4,
       activeDays: [1, 2, 3, 4, 5], // Seg a Sex
       soundEnabled: true,
       theme: "aurora-dark",
       holidays: getDefaultHolidays(2026),
-      customOverrides: {}, // { 'YYYY-MM-DD': 'school' | 'off' }
+      customOverrides: {},
       lastUpdated: Date.now()
     };
   }
@@ -77,8 +82,8 @@ class SimpleSchoolCountdown {
         if (!this.state.holidays || !this.state.holidays.length) {
           this.state.holidays = getDefaultHolidays(2026);
         }
-        if (!this.state.startDate) this.state.startDate = "2026-02-02";
-        if (!this.state.dailyHours) this.state.dailyHours = 6;
+        if (!this.state.startDate) this.state.startDate = "2026-02-05";
+        if (!this.state.dailyHours) this.state.dailyHours = 4;
       } catch (e) {
         this.state = this.getDefaultState();
       }
@@ -105,13 +110,9 @@ class SimpleSchoolCountdown {
     this.cloudSyncPill = document.getElementById("cloud-sync-pill");
     this.cloudDot = document.getElementById("cloud-dot");
     this.cloudSyncText = document.getElementById("cloud-sync-text");
-    this.modalCloudStatus = document.getElementById("modal-cloud-status");
-
     this.btnSoundToggle = document.getElementById("btn-sound-toggle");
     this.btnThemeModal = document.getElementById("btn-theme-modal");
     this.btnOpenSettings = document.getElementById("btn-open-settings");
-    this.btnForceSync = document.getElementById("btn-force-sync");
-    this.btnResetDefaults = document.getElementById("btn-reset-defaults");
     this.liveClock = document.getElementById("live-clock");
     this.toastContainer = document.getElementById("toast-container");
 
@@ -148,6 +149,9 @@ class SimpleSchoolCountdown {
     this.inputStartDate = document.getElementById("input-start-date");
     this.inputEndDate = document.getElementById("input-end-date");
     this.inputDailyHours = document.getElementById("input-daily-hours");
+    this.modalCloudStatus = document.getElementById("modal-cloud-status");
+    this.btnForceSync = document.getElementById("btn-force-sync");
+    this.btnResetDefaults = document.getElementById("btn-reset-defaults");
 
     this.modalHoliday = document.getElementById("modal-holiday");
     this.formHoliday = document.getElementById("form-holiday");
@@ -160,61 +164,58 @@ class SimpleSchoolCountdown {
     this.modalTheme = document.getElementById("modal-theme");
   }
 
-  // --- Sincronização em Nuvem em Tempo Real (Multi-Usuário) ---
+  // --- Sincronização em Nuvem (Supabase + BroadcastChannel) ---
   initCloudSync() {
-    this.setCloudStatus("syncing", "Conectando à nuvem...");
-
-    // 1. BroadcastChannel para sincronização instantânea entre abas no mesmo navegador
+    // 1. Sincronização instantânea entre abas no mesmo navegador
     try {
       if ("BroadcastChannel" in window) {
-        this.broadcastChannel = new BroadcastChannel("dias_letivos_cloud_channel");
+        this.broadcastChannel = new BroadcastChannel("dias_letivos_channel");
         this.broadcastChannel.onmessage = (event) => {
           if (event.data && event.data.type === "STATE_UPDATED") {
-            this.handleIncomingCloudState(event.data.state, "Aba local");
+            this.handleIncomingCloudState(event.data.state, "Aba Local");
           }
         };
       }
     } catch (e) {}
 
-    // 2. Firebase Realtime Database
-    const firebaseConfig = {
-      databaseURL: "https://contagem-letivos-default-rtdb.firebaseio.com"
-    };
-
-    let firebaseDb = null;
+    // 2. Inicializar Cliente Supabase
     try {
-      if (window.firebase && !firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
-        firebaseDb = firebase.database();
-      } else if (window.firebase) {
-        firebaseDb = firebase.database();
+      if (window.supabase && typeof window.supabase.createClient === "function") {
+        this.supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
       }
     } catch (e) {
-      console.warn("Firebase init notice:", e);
+      console.warn("Supabase init error:", e);
     }
 
-    if (firebaseDb) {
-      this.firebaseRef = firebaseDb.ref("course_shared_room_v1");
-      
-      // Escutar alterações remotas em tempo real
-      this.firebaseRef.on("value", (snapshot) => {
-        const cloudData = snapshot.val();
-        if (cloudData) {
-          this.handleIncomingCloudState(cloudData, "Nuvem Realtime");
-        } else {
-          // Se banco estiver vazio na primeira execução, publica o estado padrão
-          this.pushToCloud();
-        }
-        this.setCloudStatus("connected", "Sincronizado na Nuvem");
-      }, (error) => {
-        console.warn("Firebase listener error:", error);
-        this.initRestCloudFallback();
-      });
-    } else {
-      this.initRestCloudFallback();
+    // 3. Buscar dados iniciais do Supabase
+    this.fetchCloudState();
+
+    // 4. Supabase Realtime Channel (escutar alterações na nuvem ao vivo)
+    if (this.supabase) {
+      try {
+        this.supabase
+          .channel("countdown_changes")
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "countdown_data" },
+            (payload) => {
+              if (payload.new) {
+                const mappedState = this.mapSupabaseRowToState(payload.new);
+                this.handleIncomingCloudState(mappedState, "Supabase Nuvem");
+              }
+            }
+          )
+          .subscribe((status) => {
+            if (status === "SUBSCRIBED") {
+              this.setCloudStatus("connected", "Supabase Conectado");
+            }
+          });
+      } catch (e) {
+        console.warn("Supabase Realtime notice:", e);
+      }
     }
 
-    // Sincronizar ao focar ou reabrir a aba
+    // Sincronizar ao reabrir ou focar na aba
     window.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
         this.fetchCloudState();
@@ -231,34 +232,68 @@ class SimpleSchoolCountdown {
     });
   }
 
-  initRestCloudFallback() {
-    this.fetchCloudState();
-    // Polling a cada 20 segundos como fallback resiliente
-    setInterval(() => this.fetchCloudState(), 20000);
+  mapSupabaseRowToState(row) {
+    return {
+      title: row.title || this.state.title,
+      startDate: row.start_date ? String(row.start_date).slice(0, 10) : this.state.startDate,
+      endDate: row.end_date ? String(row.end_date).slice(0, 10) : this.state.endDate,
+      dailyHours: parseFloat(row.daily_hours) || this.state.dailyHours,
+      activeDays: Array.isArray(row.active_days) ? row.active_days : this.state.activeDays,
+      theme: row.theme || this.state.theme,
+      holidays: Array.isArray(row.holidays) ? row.holidays : this.state.holidays,
+      customOverrides: (row.custom_overrides && typeof row.custom_overrides === "object") ? row.custom_overrides : this.state.customOverrides,
+      lastUpdated: row.updated_at ? new Date(row.updated_at).getTime() : Date.now()
+    };
   }
 
   async fetchCloudState() {
+    this.setCloudStatus("syncing", "Buscando no Supabase...");
     try {
-      this.setCloudStatus("syncing", "Verificando nuvem...");
-      const res = await fetch("https://contagem-letivos-default-rtdb.firebaseio.com/course_shared_room_v1.json");
-      if (res.ok) {
-        const data = await res.json();
-        if (data) {
-          this.handleIncomingCloudState(data, "Nuvem REST");
+      if (this.supabase) {
+        const { data, error } = await this.supabase
+          .from("countdown_data")
+          .select("*")
+          .eq("id", "default")
+          .single();
+
+        if (!error && data) {
+          const mapped = this.mapSupabaseRowToState(data);
+          this.handleIncomingCloudState(mapped, "Supabase Nuvem");
+          this.setCloudStatus("connected", "Supabase Sincronizado");
+          return;
         }
-        this.setCloudStatus("connected", "Sincronizado na Nuvem");
+      }
+
+      // Fallback direto via fetch REST API do Supabase
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/countdown_data?id=eq.default&select=*`, {
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      });
+
+      if (res.ok) {
+        const items = await res.json();
+        if (items && items.length > 0) {
+          const mapped = this.mapSupabaseRowToState(items[0]);
+          this.handleIncomingCloudState(mapped, "Supabase REST");
+          this.setCloudStatus("connected", "Supabase Sincronizado");
+        } else {
+          this.setCloudStatus("connected", "Supabase Conectado");
+        }
       } else {
-        this.setCloudStatus("connected", "Sincronizado Local/Nuvem");
+        this.setCloudStatus("connected", "Salvo Localmente");
       }
     } catch (e) {
+      console.warn("Supabase fetch notice:", e);
       this.setCloudStatus("offline", "Modo Offline (Salvo Local)");
     }
   }
 
   pushToCloud() {
-    this.setCloudStatus("syncing", "Salvando na nuvem...");
+    this.setCloudStatus("syncing", "Salvando no Supabase...");
 
-    // Enviar para BroadcastChannel (outras abas)
+    // Enviar para BroadcastChannel (outras abas locais)
     if (this.broadcastChannel) {
       this.broadcastChannel.postMessage({
         type: "STATE_UPDATED",
@@ -266,62 +301,66 @@ class SimpleSchoolCountdown {
       });
     }
 
-    // Debounce para Firebase / REST
+    // Debounce para salvar no Supabase
     clearTimeout(this.syncDebounceTimer);
     this.syncDebounceTimer = setTimeout(async () => {
+      const payload = {
+        id: "default",
+        title: this.state.title,
+        start_date: this.state.startDate,
+        end_date: this.state.endDate,
+        daily_hours: parseFloat(this.state.dailyHours) || 4,
+        active_days: this.state.activeDays || [1, 2, 3, 4, 5],
+        theme: this.state.theme || "aurora-dark",
+        holidays: this.state.holidays || [],
+        custom_overrides: this.state.customOverrides || {},
+        updated_at: new Date().toISOString()
+      };
+
       try {
-        if (this.firebaseRef) {
-          await this.firebaseRef.set(this.state);
+        if (this.supabase) {
+          const { error } = await this.supabase
+            .from("countdown_data")
+            .upsert(payload);
+
+          if (error) throw error;
         } else {
-          await fetch("https://contagem-letivos-default-rtdb.firebaseio.com/course_shared_room_v1.json", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(this.state)
+          // REST Fallback
+          await fetch(`${SUPABASE_URL}/rest/v1/countdown_data`, {
+            method: "POST",
+            headers: {
+              "apikey": SUPABASE_ANON_KEY,
+              "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+              "Content-Type": "application/json",
+              "Prefer": "resolution=merge-duplicates"
+            },
+            body: JSON.stringify(payload)
           });
         }
-        this.setCloudStatus("connected", "Sincronizado na Nuvem");
-      } catch (e) {
-        console.warn("Erro ao sincronizar na nuvem:", e);
+        this.setCloudStatus("connected", "Supabase Sincronizado");
+      } catch (err) {
+        console.warn("Erro ao salvar no Supabase:", err);
         this.setCloudStatus("offline", "Salvo Localmente");
       }
     }, 400);
   }
 
-  handleIncomingCloudState(remoteState, source = "Nuvem") {
+  handleIncomingCloudState(remoteState, source = "Supabase") {
     if (!remoteState || typeof remoteState !== "object") return;
 
-    // Verificar se o estado remoto é mais recente ou diferente
-    const currentJson = JSON.stringify({
-      title: this.state.title,
-      startDate: this.state.startDate,
-      endDate: this.state.endDate,
-      dailyHours: this.state.dailyHours,
-      activeDays: this.state.activeDays,
-      holidays: this.state.holidays,
-      customOverrides: this.state.customOverrides
-    });
+    const currentKey = `${this.state.title}|${this.state.startDate}|${this.state.endDate}|${this.state.dailyHours}|${JSON.stringify(this.state.activeDays)}|${JSON.stringify(this.state.holidays)}|${JSON.stringify(this.state.customOverrides)}`;
+    const remoteKey = `${remoteState.title}|${remoteState.startDate}|${remoteState.endDate}|${remoteState.dailyHours}|${JSON.stringify(remoteState.activeDays)}|${JSON.stringify(remoteState.holidays)}|${JSON.stringify(remoteState.customOverrides)}`;
 
-    const remoteJson = JSON.stringify({
-      title: remoteState.title,
-      startDate: remoteState.startDate,
-      endDate: remoteState.endDate,
-      dailyHours: remoteState.dailyHours,
-      activeDays: remoteState.activeDays,
-      holidays: remoteState.holidays,
-      customOverrides: remoteState.customOverrides
-    });
-
-    if (currentJson === remoteJson) {
-      this.setCloudStatus("connected", "Sincronizado na Nuvem");
+    if (currentKey === remoteKey) {
+      this.setCloudStatus("connected", "Supabase Sincronizado");
       return;
     }
 
-    // Aplicar novo estado remoto
+    // Aplicar estado remoto
     this.isReceivingRemoteUpdate = true;
     this.state = {
       ...this.state,
       ...remoteState,
-      // Manter preferências individuais de tema e som locais, mas sincronizar regras do curso
       theme: this.state.theme || remoteState.theme || "aurora-dark",
       soundEnabled: this.state.soundEnabled !== undefined ? this.state.soundEnabled : true
     };
@@ -330,8 +369,8 @@ class SimpleSchoolCountdown {
     this.render();
     this.isReceivingRemoteUpdate = false;
 
-    this.setCloudStatus("connected", "Sincronizado na Nuvem");
-    this.showToast(`🔄 Configurações atualizadas via ${source}!`, "info");
+    this.setCloudStatus("connected", "Supabase Sincronizado");
+    this.showToast(`🔄 Sincronizado via ${source}!`, "info");
     this.playSound("success");
   }
 
@@ -341,7 +380,7 @@ class SimpleSchoolCountdown {
       this.cloudSyncText.innerText = text;
     }
     if (this.modalCloudStatus) {
-      this.modalCloudStatus.innerText = status === "connected" ? "Ativa & Sincronizada" : (status === "syncing" ? "Sincronizando..." : "Salvo Localmente");
+      this.modalCloudStatus.innerText = status === "connected" ? "Supabase Conectado" : (status === "syncing" ? "Sincronizando..." : "Salvo Localmente");
       this.modalCloudStatus.className = `cloud-status-badge ${status === "connected" ? "active" : ""}`;
     }
   }
@@ -401,17 +440,17 @@ class SimpleSchoolCountdown {
     // Forçar Sincronização
     if (this.btnForceSync) {
       this.btnForceSync.addEventListener("click", async () => {
-        this.showToast("Buscando atualizações na nuvem...", "info");
+        this.showToast("Buscando dados no Supabase...", "info");
         await this.fetchCloudState();
-        this.showToast("Nuvem sincronizada com sucesso!", "success");
+        this.showToast("Supabase sincronizado com sucesso!", "success");
         this.playSound("success");
       });
     }
 
-    // Restaurar Padrões Recomendados
+    // Restaurar Padrões
     if (this.btnResetDefaults) {
       this.btnResetDefaults.addEventListener("click", () => {
-        if (confirm("Deseja restaurar as datas e horários para o padrão (Início: 02/02/2026, 6h/dia)?")) {
+        if (confirm("Deseja restaurar as datas e horários para o padrão?")) {
           const defaults = this.getDefaultState();
           this.state.title = defaults.title;
           this.state.startDate = defaults.startDate;
@@ -422,7 +461,7 @@ class SimpleSchoolCountdown {
           this.state.customOverrides = {};
           this.openSettingsModal();
           this.saveState(true);
-          this.showToast("Padrões restaurados e sincronizados para todos!", "success");
+          this.showToast("Padrões restaurados e sincronizados no Supabase!", "success");
         }
       });
     }
@@ -620,7 +659,7 @@ class SimpleSchoolCountdown {
     const progressPct = totalDays > 0 ? Math.min(100, Math.round((doneDays / totalDays) * 100)) : 0;
     const activeDaysPerWeek = this.state.activeDays.length || 5;
     const weeksLeft = Math.ceil(leftDays / activeDaysPerWeek);
-    const dailyHours = parseFloat(this.state.dailyHours) || 6;
+    const dailyHours = parseFloat(this.state.dailyHours) || 4;
     const hoursLeft = leftDays * dailyHours;
     const totalHours = totalDays * dailyHours;
 
@@ -827,19 +866,19 @@ class SimpleSchoolCountdown {
   }
 
   deleteHoliday(id) {
-    if (confirm("Deseja remover este feriado/recesso para todos?")) {
+    if (confirm("Deseja remover este feriado/recesso?")) {
       this.state.holidays = this.state.holidays.filter(h => h.id !== id);
       this.saveState(true);
-      this.showToast("Recesso removido e sincronizado!", "info");
+      this.showToast("Recesso removido e sincronizado no Supabase!", "info");
     }
   }
 
   // --- Modal Configurações do Curso ---
   openSettingsModal() {
     this.inputCourseTitle.value = this.state.title || "";
-    this.inputStartDate.value = this.state.startDate || "2026-02-02";
-    this.inputEndDate.value = this.state.endDate || "2026-12-18";
-    this.inputDailyHours.value = this.state.dailyHours || 6;
+    this.inputStartDate.value = this.state.startDate || "";
+    this.inputEndDate.value = this.state.endDate || "";
+    this.inputDailyHours.value = this.state.dailyHours || 4;
 
     const days = [1, 2, 3, 4, 5, 6];
     const ids = ["chk-mon", "chk-tue", "chk-wed", "chk-thu", "chk-fri", "chk-sat"];
@@ -855,9 +894,9 @@ class SimpleSchoolCountdown {
   handleSaveSettings(e) {
     e.preventDefault();
     this.state.title = this.inputCourseTitle.value.trim() || "Dias Letivos";
-    this.state.startDate = this.inputStartDate.value || "2026-02-02";
-    this.state.endDate = this.inputEndDate.value || "2026-12-18";
-    this.state.dailyHours = parseFloat(this.inputDailyHours.value) || 6;
+    this.state.startDate = this.inputStartDate.value;
+    this.state.endDate = this.inputEndDate.value;
+    this.state.dailyHours = parseFloat(this.inputDailyHours.value) || 4;
 
     const active = [];
     const days = [1, 2, 3, 4, 5, 6];
@@ -871,7 +910,7 @@ class SimpleSchoolCountdown {
     this.modalSettings.classList.remove("active");
     this.saveState(true);
     this.playSound("success");
-    this.showToast("Configurações salvas e sincronizadas para todos os usuários! 🌐", "success");
+    this.showToast("Configurações salvas e sincronizadas no Supabase!", "success");
   }
 
   // --- Modal Adicionar Feriado ---
@@ -906,10 +945,10 @@ class SimpleSchoolCountdown {
     this.modalHoliday.classList.remove("active");
     this.saveState(true);
     this.playSound("success");
-    this.showToast("Novo recesso/feriado adicionado e sincronizado!", "success");
+    this.showToast("Novo recesso adicionado e sincronizado no Supabase!", "success");
   }
 
-  // --- Toast Notifications ---
+  // --- Toast ---
   showToast(message, type = "info") {
     const toast = document.createElement("div");
     toast.className = `toast ${type}`;
@@ -924,7 +963,7 @@ class SimpleSchoolCountdown {
     setTimeout(() => {
       toast.style.animation = "slideToast 0.3s reverse forwards";
       setTimeout(() => toast.remove(), 300);
-    }, 3200);
+    }, 3000);
   }
 }
 
