@@ -49,6 +49,11 @@ class SimpleSchoolCountdown {
     // Iniciar Sincronização em Nuvem (Supabase + Multi-usuários em Tempo Real)
     this.initCloudSync();
 
+    // Comemoração animada ao entrar no site caso esteja em marco especial (30, 14, 7, 1 dia)
+    setTimeout(() => {
+      this.checkEntryMilestoneCelebration();
+    }, 700);
+
     setInterval(() => this.updateClock(), 1000);
 
     if (window.lucide) {
@@ -122,6 +127,9 @@ class SimpleSchoolCountdown {
     this.periodDateRange = document.getElementById("period-date-range");
     this.hugeDaysNumber = document.getElementById("huge-days-number");
     this.countdownSubText = document.getElementById("countdown-sub-text");
+    this.milestoneBadge = document.getElementById("milestone-badge");
+    this.milestoneIcon = document.getElementById("milestone-icon");
+    this.milestoneText = document.getElementById("milestone-text");
     this.progressPercent = document.getElementById("progress-percent");
     this.progressBarFill = document.getElementById("progress-bar-fill");
     this.statDaysDone = document.getElementById("stat-days-done");
@@ -424,6 +432,16 @@ class SimpleSchoolCountdown {
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
         osc.start(now);
         osc.stop(now + 0.05);
+      } else if (type === "celebration") {
+        osc.type = "triangle";
+        const notes = [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5]; // Fanfarra alegre: Dó, Mi, Sol, Dó alto
+        notes.forEach((freq, idx) => {
+          osc.frequency.setValueAtTime(freq, now + idx * 0.09);
+        });
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+        osc.start(now);
+        osc.stop(now + 0.65);
       }
     } catch (e) {}
   }
@@ -516,6 +534,14 @@ class SimpleSchoolCountdown {
     // Adicionar Feriado
     this.btnAddHoliday.addEventListener("click", () => this.openHolidayModal());
     this.formHoliday.addEventListener("submit", (e) => this.handleSaveHoliday(e));
+
+    // Clique no Badge de Marco para Comemorar Novamente
+    if (this.milestoneBadge) {
+      this.milestoneBadge.addEventListener("click", () => {
+        const stats = this.calculateStats();
+        this.triggerCelebration(stats.leftDays, false);
+      });
+    }
 
     // Fechar Modais
     document.querySelectorAll(".modal-close, .modal-overlay").forEach(el => {
@@ -685,6 +711,158 @@ class SimpleSchoolCountdown {
     };
   }
 
+  // --- Sistema de Marcos Comemorativos (30, 14, 7, 1 e 0 dias) ---
+  getMilestoneData(leftDays) {
+    if (leftDays === 0) {
+      return {
+        tier: "tier-finished",
+        icon: "🏆",
+        text: "Curso Concluído! Parabéns a Todos!",
+        celebrationLevel: "epic",
+        toast: "🏆 Parabéns turma! Todos os dias letivos foram concluídos com sucesso!"
+      };
+    } else if (leftDays === 1) {
+      return {
+        tier: "tier-day-one",
+        icon: "🎓",
+        text: "É Amanhã: Último Dia Letivo!",
+        celebrationLevel: "high",
+        toast: "🎓 É AMANHÃ! O último dia letivo do curso chegou!"
+      };
+    } else if (leftDays >= 2 && leftDays <= 7) {
+      return {
+        tier: "tier-week",
+        icon: "🚀",
+        text: leftDays === 7 ? "Reta Final: Última Semana (7 dias)!" : `Reta Final: Última Semana (${leftDays} dias)!`,
+        celebrationLevel: "medium",
+        toast: `🚀 Reta Final! Estamos na ÚLTIMA SEMANA (${leftDays} dias restantes)!`
+      };
+    } else if (leftDays >= 8 && leftDays <= 14) {
+      return {
+        tier: "tier-two-weeks",
+        icon: "⚡",
+        text: leftDays === 14 ? "Quase Lá: Últimas 2 Semanas (14 dias)!" : `Quase Lá: Últimas 2 Semanas (${leftDays} dias)!`,
+        celebrationLevel: "standard",
+        toast: `⚡ Atenção turma! Faltam apenas ${leftDays} dias letivos (Últimas duas semanas)!`
+      };
+    } else if (leftDays >= 15 && leftDays <= 30) {
+      return {
+        tier: "tier-month",
+        icon: "🔥",
+        text: leftDays === 30 ? "Reta Final: Último Mês (30 dias)!" : `Reta Final: Último Mês (${leftDays} dias)!`,
+        celebrationLevel: "standard",
+        toast: `🔥 Entramos no último mês de aulas! Faltam ${leftDays} dias letivos!`
+      };
+    }
+    return null;
+  }
+
+  updateMilestoneBadge(leftDays) {
+    if (!this.milestoneBadge) return;
+    const milestone = this.getMilestoneData(leftDays);
+
+    if (milestone) {
+      this.milestoneBadge.className = `milestone-badge ${milestone.tier}`;
+      if (this.milestoneIcon) this.milestoneIcon.innerText = milestone.icon;
+      if (this.milestoneText) this.milestoneText.innerText = milestone.text;
+      this.milestoneBadge.style.display = "inline-flex";
+    } else {
+      this.milestoneBadge.style.display = "none";
+    }
+  }
+
+  checkEntryMilestoneCelebration() {
+    const stats = this.calculateStats();
+    const milestone = this.getMilestoneData(stats.leftDays);
+    if (milestone) {
+      this.triggerCelebration(stats.leftDays, true);
+    }
+  }
+
+  triggerCelebration(leftDays, isAutoEntry = false) {
+    const milestone = this.getMilestoneData(leftDays);
+    if (!milestone) return;
+
+    // 1. Efeitos Visuais de Confetti / Fogos de Artifício
+    if (window.confetti) {
+      if (milestone.celebrationLevel === "epic" || milestone.celebrationLevel === "high") {
+        // Fogos de artifício contínuos em múltiplos estágios
+        const duration = 2500;
+        const animationEnd = Date.now() + duration;
+        const celebrationColors = ["#6366f1", "#06b6d4", "#f59e0b", "#ec4899", "#10b981", "#ffffff"];
+        const frame = () => {
+          window.confetti({
+            particleCount: 4,
+            angle: 60,
+            spread: 60,
+            origin: { x: 0, y: 0.7 },
+            colors: celebrationColors
+          });
+          window.confetti({
+            particleCount: 4,
+            angle: 120,
+            spread: 60,
+            origin: { x: 1, y: 0.7 },
+            colors: celebrationColors
+          });
+          if (Date.now() < animationEnd) {
+            requestAnimationFrame(frame);
+          }
+        };
+        frame();
+      } else if (milestone.celebrationLevel === "medium") {
+        // Canhão duplo das laterais para a última semana
+        window.confetti({
+          particleCount: 75,
+          angle: 60,
+          spread: 70,
+          origin: { x: 0.1, y: 0.75 }
+        });
+        setTimeout(() => {
+          window.confetti({
+            particleCount: 75,
+            angle: 120,
+            spread: 70,
+            origin: { x: 0.9, y: 0.75 }
+          });
+        }, 180);
+        setTimeout(() => {
+          window.confetti({
+            particleCount: 65,
+            spread: 90,
+            origin: { y: 0.6 }
+          });
+        }, 360);
+      } else {
+        // Canhão central comemorativo (14 e 30 dias)
+        window.confetti({
+          particleCount: 90,
+          spread: 80,
+          origin: { y: 0.65 }
+        });
+      }
+    }
+
+    // 2. Efeito Sonoro Alegre
+    this.playSound("celebration");
+
+    // 3. Notificação Toast Comemorativa
+    if (isAutoEntry) {
+      setTimeout(() => {
+        this.showToast(milestone.toast, "success");
+      }, 400);
+    } else {
+      this.showToast(milestone.toast, "success");
+    }
+
+    // 4. Animação de pulso dinâmico no badge
+    if (this.milestoneBadge) {
+      this.milestoneBadge.style.animation = "none";
+      this.milestoneBadge.offsetHeight; // Forçar reflow
+      this.milestoneBadge.style.animation = "milestonePulseAlert 0.8s ease-out, milestoneFloat 3s infinite ease-in-out 0.8s";
+    }
+  }
+
   // --- Renderização Geral ---
   render() {
     const stats = this.calculateStats();
@@ -728,12 +906,8 @@ class SimpleSchoolCountdown {
       this.statCalendarDaysSub.innerText = `dias corridos (${stats.totalCalendarDays} tot.)`;
     }
 
-    // Confetti ao atingir 100%
-    if (stats.progressPct === 100 && stats.totalDays > 0) {
-      if (window.confetti) {
-        window.confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-      }
-    }
+    // Atualizar badge de marco especial comemorativo
+    this.updateMilestoneBadge(stats.leftDays);
 
     this.renderCalendar();
     this.renderHolidaysList();
